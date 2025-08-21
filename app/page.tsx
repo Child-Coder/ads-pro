@@ -1,40 +1,117 @@
-'use client'; // This directive is necessary for using hooks like useState and useEffect
+                      'use client';
 
 import { useEffect, useState } from 'react';
-import { auth, db } from './firebase'; // Make sure firebase.js (or .ts) is in the 'app' directory
+import { auth, db } from './firebase'; 
 import { signInAnonymously, onAuthStateChanged, User as FirebaseUser } from "firebase/auth";
-import { doc, setDoc, getDoc, serverTimestamp } from "firebase/firestore";
+import { doc, setDoc, getDoc, serverTimestamp, DocumentData } from "firebase/firestore";
 
-// Define a type for the Telegram user data for better type-checking
 interface TelegramUser {
     id: number;
-        first_name: string;
-            last_name?: string;
-                username?: string;
-                }
+    first_name: string;
+    last_name?: string;
+    username?: string;
+}
 
-                export default function HomePage() {
-                  const [tgUser, setTgUser] = useState<TelegramUser | null>(null);
-                    const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
-                      const [loading, setLoading] = useState(true);
-                        const [error, setError] = useState('');
+export default function HomePage() {
+  const [tgUser, setTgUser] = useState<TelegramUser | null>(null);
+  const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
+  // Firestore থেকে ইউজারের সম্পূর্ণ ডেটা রাখার জন্য নতুন স্টেট
+  const [userData, setUserData] = useState<DocumentData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
-                          useEffect(() => {
-                              // This effect runs once when the component mounts
-                                  
-                                      // 1. Authenticate with Firebase Anonymously
-                                          const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
-                                                if (user) {
-                                                        setFirebaseUser(user);
-                                                              } else {
-                                                                      signInAnonymously(auth).catch((err) => {
-                                                                                console.error("Firebase anonymous sign-in error:", err);
-                                                                                          setError("Could not connect to authentication service.");
-                                                                                                  });
-                                                                                                        }
-                                                                                                            });
+  useEffect(() => {
+    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        setFirebaseUser(user);
+      } else {
+        signInAnonymously(auth).catch((err) => {
+          console.error("Firebase anonymous sign-in error:", err);
+          setError("Could not connect to authentication service.");
+        });
+      }
+    });
 
-                                                                                                                // 2. Initialize Telegram Web App and get user data
+    if (typeof window !== 'undefined' && window.Telegram && window.Telegram.WebApp) {
+      const telegramApp = window.Telegram.WebApp;
+      telegramApp.ready();
+      const user = telegramApp.initDataUnsafe?.user;
+      if (user && user.id) {
+        setTgUser(user);
+      } else {
+        setError("Could not retrieve Telegram user data. Please access this app through Telegram.");
+        setLoading(false);
+      }
+    } else {
+      console.warn("Telegram Web App script not found. Using dummy data for development.");
+      setTgUser({ id: 12345678, first_name: "Dev", last_name: "User", username: "devuser" });
+    }
+
+    return () => {
+      unsubscribeAuth();
+    };
+  }, []);
+
+  useEffect(() => {
+    const manageUserData = async () => {
+      if (tgUser && firebaseUser) {
+        const userDocRef = doc(db, "users", String(tgUser.id));
+        try {
+          const docSnap = await getDoc(userDocRef);
+          if (!docSnap.exists()) {
+            // নতুন ইউজার: coins: 0 সহ ডেটা তৈরি করুন
+            const newUserData = {
+              first_name: tgUser.first_name,
+              last_name: tgUser.last_name || null,
+              username: tgUser.username || null,
+              createdAt: serverTimestamp(),
+              firebaseUid: firebaseUser.uid,
+              coins: 0, // নতুন ইউজারের জন্য初始 কয়েন
+            };
+            await setDoc(userDocRef, newUserData);
+            setUserData(newUserData);
+            console.log("New user created with 0 coins:", tgUser.id);
+          } else {
+            // পুরনো ইউজার: Firestore থেকে ডেটা লোড করুন
+            setUserData(docSnap.data());
+            console.log("User data loaded from Firestore:", tgUser.id);
+          }
+        } catch (err) {
+          console.error("Error interacting with Firestore:", err);
+          setError("There was a problem saving your data.");
+        } finally {
+          setLoading(false);
+        }
+      }
+    };
+
+    if (tgUser && firebaseUser) {
+        manageUserData();
+    }
+  }, [tgUser, firebaseUser]);
+
+  if (loading) {
+    return <div className="flex items-center justify-center min-h-screen">Loading...</div>;
+  }
+
+  if (error) {
+    return <div className="flex items-center justify-center min-h-screen text-red-500">{error}</div>;
+  }
+
+  return (
+    <main className="flex flex-col items-center justify-center min-h-screen p-4 bg-gray-900 text-white">
+      <div className="text-center bg-gray-800 p-8 rounded-lg shadow-lg">
+        <h1 className="text-4xl font-bold mb-2">Welcome, {userData?.first_name}!</h1>
+        <p className="text-2xl text-yellow-400 font-semibold mt-4">
+          Your Coin Balance: {userData?.coins}
+        </p>
+        <div className="mt-6 text-xs text-gray-500">
+          <p>Telegram ID: {tgUser?.id}</p>
+        </div>
+      </div>
+    </main>
+  );
+        }                                                                                          // 2. Initialize Telegram Web App and get user data
                                                                                                                     if (typeof window !== 'undefined' && window.Telegram && window.Telegram.WebApp) {
                                                                                                                           const telegramApp = window.Telegram.WebApp;
                                                                                                                                 telegramApp.ready();
